@@ -1,0 +1,6 @@
+* text=auto
+
+*.fs text
+*.config text
+*.fsproj text
+*.css text
