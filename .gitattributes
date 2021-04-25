@@ -4,3 +4,4 @@
 *.config text
 *.fsproj text
 *.css text
+*.csv text

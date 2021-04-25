@@ -10,34 +10,21 @@ open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
 open Giraffe
 open XPlot.Plotly
+open CovidWeb
 
 // ---------------------------------
 // Data Provider
 // ---------------------------------
 
-module CovidDataProvider =
-  open FSharp.Data
+module DataProvider =
+  let private stateData =
+    CovidDataProvider.loadByState "/users/judson/fsharp/covid-19-data/us-states.csv"
+  let private usData =
+    CovidDataProvider.loadUs "/users/judson/fsharp/covid-19-data/us.csv"
 
-  [<Literal>]
-  let private statesPath = "/users/judson/fsharp/covid-19-data/us-states.csv"
-
-  [<Literal>]
-  let private usPath = "/users/judson/fsharp/covid-19-data/us.csv"
-
-  type CovidByState = CsvProvider<statesPath>
-  type CovidUs = CsvProvider<usPath>
-
-  let private cvdByState = CovidByState.Load(statesPath)
-  let private cvdUs = CovidUs.Load(usPath)
-
-  let allStates =
-    cvdByState.Rows
-    |> Seq.groupBy (fun r -> r.State)
-    |> Seq.map (fun g -> fst g)
-    |> Seq.sortBy (fun state -> state)
-
-  let byState state = cvdByState.Rows |> Seq.filter (fun x -> x.State = state)
-  let entireUs = cvdUs.Rows
+  let allStates = CovidDataProvider.allStates stateData
+  let byState = CovidDataProvider.byState stateData
+  let entireUs = CovidDataProvider.entireUs usData
 
 // ---------------------------------
 // Views
@@ -53,7 +40,7 @@ module Views =
     ul [] [ for state in states do buildLink state |> buildItem ]
 
   let usLinks () = ul [] [ a [ _href "/deaths" ] [ encodedText "United States" ] ]
-  let stateLinksNav = nav [ _id "nav" ] [ usLinks (); stateLinks CovidDataProvider.allStates ]
+  let stateLinksNav = nav [ _id "nav" ] [ usLinks (); stateLinks DataProvider.allStates ]
 
   [<Literal>]
   let url = "https://github.com/nytimes/covid-19-data"
@@ -159,15 +146,15 @@ module Views =
 // ---------------------------------
 
 let deathsByStateHandler state =
-  let stateData = CovidDataProvider.byState state
+  let stateData = DataProvider.byState state
   htmlView (Views.deathsChartView state stateData)
 
 let casesByStateHandler state =
-  let stateData = CovidDataProvider.byState state
+  let stateData = DataProvider.byState state
   htmlView (Views.casesChartView state stateData)
 
-let deathsHandler () = htmlView (Views.usDeathsChartView CovidDataProvider.entireUs)
-let casesHandler () = htmlView (Views.usCasesChartView CovidDataProvider.entireUs)
+let deathsHandler () = htmlView (Views.usDeathsChartView DataProvider.entireUs)
+let casesHandler () = htmlView (Views.usCasesChartView DataProvider.entireUs)
 
 let webApp =
   choose [
