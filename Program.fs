@@ -10,21 +10,34 @@ open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
 open Giraffe
 open XPlot.Plotly
-open CovidWeb
 
 // ---------------------------------
 // Data Provider
 // ---------------------------------
 
 module DataProvider =
-  let private stateData =
-    CovidDataProvider.loadByState "/users/judson/fsharp/covid-19-data/us-states.csv"
-  let private usData =
-    CovidDataProvider.loadUs "/users/judson/fsharp/covid-19-data/us.csv"
+  open FSharp.Data
 
-  let allStates = CovidDataProvider.allStates stateData
-  let byState = CovidDataProvider.byState stateData
-  let entireUs = CovidDataProvider.entireUs usData
+  [<Literal>]
+  let private statesPath = "/users/judson/fsharp/covid-19-data/us-states.csv"
+
+  [<Literal>]
+  let private usPath = "/users/judson/fsharp/covid-19-data/us.csv"
+
+  type CovidByState = CsvProvider<statesPath>
+  type CovidUs = CsvProvider<usPath>
+
+  let stateData () = CovidByState.Load(statesPath)
+  let usData () = CovidUs.Load(usPath)
+
+  let allStates () =
+    (stateData ()).Rows
+    |> Seq.groupBy (fun r -> r.State)
+    |> Seq.map (fun g -> fst g)
+    |> Seq.sortBy (fun state -> state)
+
+  let byState state = (stateData ()).Rows |> Seq.filter (fun x -> x.State = state)
+  let entireUs () = (usData ()).Rows
 
 // ---------------------------------
 // Views
@@ -34,13 +47,11 @@ module Views =
   open Giraffe.ViewEngine
 
   let stateLinks states =
-    let buildLink state = a [ _href $"/deaths/{state}" ] [ encodedText state ]
-    let buildItem content = li [] [ content ]
+    let buildLink state = a [ _href $"/states/{state}" ] [ encodedText state ]
+    ul [] [ for state in states do li [] [ (buildLink state) ] ]
 
-    ul [] [ for state in states do buildLink state |> buildItem ]
-
-  let usLinks () = ul [] [ a [ _href "/deaths" ] [ encodedText "United States" ] ]
-  let stateLinksNav = nav [ _id "nav" ] [ usLinks (); stateLinks DataProvider.allStates ]
+  let usLink () = ul [] [ li [] [ a [ _href "/" ] [ encodedText "United States" ] ] ]
+  let stateLinksNav = nav [ _id "nav" ] [ usLink (); stateLinks (DataProvider.allStates ()) ]
 
   [<Literal>]
   let url = "https://github.com/nytimes/covid-19-data"
@@ -51,7 +62,7 @@ module Views =
   let layout (sectionTitle: string) (navigation: XmlNode) (content: XmlNode list) =
     html [] [
       head [] [
-        title []  [ encodedText "US Covid Data" ]
+        title [] [ encodedText "US Covid Data" ]
         link [ _rel  "stylesheet"; _type "text/css"; _href "/main.css" ]
         link [ _rel "preconnect"; _href "https://fonts.gstatic.com" ]
         link [ _href "https://fonts.googleapis.com/css2?family=Bai+Jamjuree&family=Roboto&display=swap"; _rel "stylesheet" ]
@@ -76,102 +87,55 @@ module Views =
 
   let buildChartHtml (data: seq<'a>) (mf: 'a -> DateTime * int) title xTitle yTitle =
     let mappedData = data |> Seq.map mf
-    let layout =
-      Layout(title = title, xaxis = Xaxis(title = xTitle), yaxis = Yaxis(title = yTitle), font = Font (family = "Bai Jamjuree"))
+    let layout = Layout(title = title, xaxis = Xaxis(title = xTitle), yaxis = Yaxis(title = yTitle), font = Font (family = "Bai Jamjuree"))
     let chart = buildChart mappedData |> Chart.WithLayout layout
     chart.GetInlineHtml() |> Text
 
-  let buildDeathsChartHtml (data: seq<CovidDataProvider.CovidByState.Row>) state =
+  let buildDeathsChartHtml (data: seq<DataProvider.CovidByState.Row>) state =
     buildChartHtml data (fun x -> x.Date, x.Deaths) state "Date" "Deaths"
 
-  let buildCasesChartHtml (data: seq<CovidDataProvider.CovidByState.Row>) state =
+  let buildCasesChartHtml (data: seq<DataProvider.CovidByState.Row>) state =
     buildChartHtml data (fun x -> x.Date, x.Cases) state "Date" "Cases"
 
-  let buildUsDeathsChartHtml (data: seq<CovidDataProvider.CovidUs.Row>) =
+  let buildUsDeathsChartHtml (data: seq<DataProvider.CovidUs.Row>) =
     buildChartHtml data (fun x -> x.Date, x.Deaths) "United States" "Date" "Deaths"
 
-  let buildUsCasesChartHtml (data: seq<CovidDataProvider.CovidUs.Row>) =
+  let buildUsCasesChartHtml (data: seq<DataProvider.CovidUs.Row>) =
     buildChartHtml data (fun x -> x.Date, x.Cases) "United States" "Date" "Cases"
-
-  let deathVsCasesNav state =
-    div [] [
-      a [ _href $"/deaths/{state}" ] [ encodedText "Deaths" ]
-      encodedText " | "
-      a [ _href $"/cases/{state}" ] [ encodedText "Cases"]
-    ]
-
-  let usDeathVsCasesNav () =
-    div [] [
-      a [ _href $"/deaths" ] [ encodedText "Deaths" ]
-      encodedText " | "
-      a [ _href $"/cases" ] [ encodedText "Cases"]
-    ]
 
   let formatTotal (total: int) = total.ToString("N0")
 
-  let deathsChartView state stateData =
-    let last = stateData |> Seq.last
-    [
-      deathVsCasesNav state
-      buildDeathsChartHtml stateData state
-      p [ _class "total" ] [ encodedText $"Total deaths: {formatTotal last.Deaths}" ]
-    ] |> layout $"Covid Deaths in {state}" stateLinksNav
-
-  let casesChartView state stateData =
-    let last = stateData |> Seq.last
-    [
-      deathVsCasesNav state
-      buildCasesChartHtml stateData state
-      p [ _class "total" ] [ encodedText $"Total cases: {formatTotal last.Cases}" ]
-    ] |> layout $"Covid Cases in {state}" stateLinksNav
-
-  let usDeathsChartView usData =
+  let usChartView usData =
     let last = usData |> Seq.last
     [
-      usDeathVsCasesNav ()
       buildUsDeathsChartHtml usData
       p [ _class "total" ] [ encodedText $"Total deaths: {formatTotal last.Deaths}" ]
-    ] |> layout $"Covid Deaths in the United States" stateLinksNav
-
-  let usCasesChartView usData =
-    let last = usData |> Seq.last
-    [
-      usDeathVsCasesNav ()
       buildUsCasesChartHtml usData
       p [ _class "total" ] [ encodedText $"Total cases: {formatTotal last.Cases}" ]
     ] |> layout $"Covid Cases in the United States" stateLinksNav
+
+  let stateChartView state stateData =
+    let last = stateData |> Seq.last
+    [
+      buildDeathsChartHtml stateData state
+      p [ _class "total" ] [ encodedText $"Total deaths: {formatTotal last.Deaths}" ]
+      buildCasesChartHtml stateData state
+      p [ _class "total" ] [ encodedText $"Total cases: {formatTotal last.Cases}" ]
+    ] |> layout $"Covid Cases in {state}" stateLinksNav
 
 // ---------------------------------
 // Web app
 // ---------------------------------
 
-let deathsByStateHandler state =
-  let stateData = DataProvider.byState state
-  htmlView (Views.deathsChartView state stateData)
-
-let casesByStateHandler state =
-  let stateData = DataProvider.byState state
-  htmlView (Views.casesChartView state stateData)
-
-let deathsHandler () = htmlView (Views.usDeathsChartView DataProvider.entireUs)
-let casesHandler () = htmlView (Views.usCasesChartView DataProvider.entireUs)
-
 let webApp =
   choose [
     GET >=>
       choose [
-        route "/" >=> deathsHandler ()
-        route "/deaths" >=> deathsHandler ()
-        route "/cases" >=> casesHandler ()
-        routef "/deaths/%s" deathsByStateHandler
-        routef "/cases/%s" casesByStateHandler
+        route "/" >=> (htmlView (Views.usChartView (DataProvider.entireUs ())))
+        routef "/states/%s" (fun state -> htmlView (Views.stateChartView state (DataProvider.byState state)))
       ]
       setStatusCode 404 >=> text "Not Found"
   ]
-
-// ---------------------------------
-// Error handler
-// ---------------------------------
 
 let errorHandler (ex : Exception) (logger : ILogger) =
   logger.LogError(ex, "An unhandled exception has occurred while executing the request.")
