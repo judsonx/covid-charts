@@ -127,11 +127,14 @@ module Views =
 // Web app
 // ---------------------------------
 
+// Ensures that a route will be re-evaluated on each request
+let warbler f a = f a a
+
 let webApp =
   choose [
     GET >=>
       choose [
-        route "/" >=> (htmlView (Views.usChartView (DataProvider.entireUs ())))
+        route "/" >=> warbler (fun _ -> (htmlView (Views.usChartView (DataProvider.entireUs ()))))
         routef "/states/%s" (fun state -> htmlView (Views.stateChartView state (DataProvider.byState state)))
       ]
       setStatusCode 404 >=> text "Not Found"
